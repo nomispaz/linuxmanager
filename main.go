@@ -14,37 +14,37 @@ import (
 	"github.com/rivo/tview"
 )
 
-// parsepath ...
-func parsepath(path string) string {
+// parsepath: resolve "~" in path to home directory
+func parsepath(path string, userhome string) string {
 
-	homedir, err := os.UserHomeDir()
-
-	if err != nil {
-		panic(err)
-	}
-	
 	if path == "~" {
-		return homedir
+		return userhome
 	} else if strings.HasPrefix(path, "~") {
-		return filepath.Join(homedir, path[2:])
+		return filepath.Join(userhome, path[2:])
 	}
 
-	// if "~" not at the start of path, the path doesn't need to be extended. Therefore, return it unchanged.
+	// if "~" not at the start of path, the path doesn't need to be resolved. Therefore, return it unchanged.
 	return path
 }
 
-// parseconfigfile ...
-func parseconfigfile(configdir string) map[string]string {
+// parseconfigfile: read config file from users configdir and parse settings
+func parseconfigfile() map[string]string {
 
 	var configs map[string]string
 	configs = make(map[string]string)
+
+	configdir, err := os.UserConfigDir()
+
+	if err != nil {
+		panic(err)
+	}
 	
-	fileContent, err := os.ReadFile(configdir + "/.config/linuxmanager/config")
+	fileContent, err := os.ReadFile(configdir + "/linuxmanager/config")
 	
 	if err != nil {
 		panic(err)
 	}
-
+	
 	fileContent_split := strings.Fields(string(fileContent))
 	
 	for _, s := range fileContent_split {
@@ -55,8 +55,8 @@ func parseconfigfile(configdir string) map[string]string {
 	return configs
 }
 
-// populateDropdown ...
-func populateDropdown(mainapp *tview.Application, dropdown *tview.DropDown) {
+// populateDropdown: populate the dropdown menu
+func populateDropdown(app *tview.Application, wDropdown *tview.DropDown) {
 
 	// use github api to get all public repositories of my user
 	cmd, err := exec.Command("bash", "-c", "curl https://api.github.com/users/nomispaz/repos | grep full_name | cut -d':' -f 2 | cut -d'\"' -f 2").Output()
@@ -69,16 +69,16 @@ func populateDropdown(mainapp *tview.Application, dropdown *tview.DropDown) {
 
 	// loop through slice and populate dropdown-menu
 	for _, s := range result_split {
-		dropdown.AddOption(s,nil)
+		wDropdown.AddOption(s,nil)
 	}
 }
 
-// populateMenu ...
-func populateMenu(mainapp *tview.Application, menu *tview.List, contents *tview.TextView, footer *tview.TextView, curfolder string) {
+// populateMenu populate the side menu
+func populateMenu(app *tview.Application, wMenu *tview.List, wContents *tview.TextView, wFooter *tview.TextView, curfolder string, selectedfile *string) {
 
 	// remove all items from list
-	for i := range menu.GetItemCount() {
-		menu.RemoveItem(i)
+	for i := range wMenu.GetItemCount() {
+		wMenu.RemoveItem(i)
 	}
 
 	// run ls command and parse it line by line to Menu list
@@ -104,7 +104,7 @@ func populateMenu(mainapp *tview.Application, menu *tview.List, contents *tview.
 			line := cmd_scanner.Text()
 			curfile := curfolder + "/" + string(line)
 			// AddItem(shortname, description, rune, function)
-			menu.AddItem(string(line), "", '-',
+			wMenu.AddItem(string(line), "", '-',
 				func() {
 					// first check if entry is a dir or file
 					info, err := os.Stat(curfile)
@@ -118,14 +118,15 @@ func populateMenu(mainapp *tview.Application, menu *tview.List, contents *tview.
 						if err != nil {
 							panic(err)
 						}
-						contents.SetText(string(fileContent))
+						wContents.SetText(string(fileContent))
+						*selectedfile = curfile
 					} else {
 						// folder was selected --> recreate list with entries in subfolder
-						populateMenu(mainapp, menu, contents, footer, curfile)
-						contents.SetText("")
+						populateMenu(app, wMenu, wContents, wFooter, curfile, selectedfile)
+						wContents.SetText("")
 
 					}
-					footer.SetText(curfile)
+					wFooter.SetText(curfile)
 				})
 		}
 		// We're all done, unblock the channel
@@ -146,42 +147,46 @@ func populateMenu(mainapp *tview.Application, menu *tview.List, contents *tview.
 	err = cmd.Wait()
 
 	// press b to go one level up
-	menu.AddItem("Back", "One level up", 'b', func() {
+	wMenu.AddItem("Back", "One level up", 'b', func() {
 		// cut string after last "/", i.e. cut last folder
 		// --> resulting string contains folder one level up
 		lastInd := strings.LastIndex(curfolder, "/")
-		populateMenu(mainapp, menu, contents, footer, curfolder[:lastInd])
-		contents.SetText("")
-		footer.SetText(curfolder[:lastInd])
+		populateMenu(app, wMenu, wContents, wFooter, curfolder[:lastInd], selectedfile)
+		wContents.SetText("")
+		wFooter.SetText(curfolder[:lastInd])
 	})
 
 	// press q to exit
-	menu.AddItem("Quit", "Press to exit", 'q', func() {
-		mainapp.Stop()
+	wMenu.AddItem("Quit", "Press to exit", 'q', func() {
+		app.Stop()
 	})
 
 }
 
+// main function
 func main() {
 
 	app := tview.NewApplication()
 
 	userhome, err := os.UserHomeDir()
 
+	var selectedfile string
+	
 	if err != nil {
 		panic(err)
 	}
 	
-	mConfig := parseconfigfile(userhome)
+	mConfig := parseconfigfile()
 
 	startingfolder, keyexists := mConfig["defaultfolder"]
 
-	startingfolder = parsepath(startingfolder)
-	
 	// if defaultfolder is not configured, use homedir as starting folder
 	if !keyexists {
 		startingfolder = userhome
+	} else {
+		startingfolder = parsepath(startingfolder, userhome)
 	}
+	
 	
 	// generate widgets
 	wHeader := tview.NewTextView().SetTextAlign(tview.AlignCenter).SetText("Nomispaz linux manager")
@@ -214,7 +219,7 @@ func main() {
 		AddItem(wContents, 2, 1, 1, 1, 0, 0, false)
 
 	populateDropdown(app, wDropdown)
-	populateMenu(app, wMenu, wContents, wFooter, currentFolder)
+	populateMenu(app, wMenu, wContents, wFooter, currentFolder, &selectedfile)
 
 	// check for keypress
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -259,9 +264,22 @@ func main() {
 		case tcell.KeyRune:
 			switch event.Rune() {
 
-			// a was entered
+			// quit program
 			case 'q':
 				app.Stop()
+				
+			// execute selected script
+			case 'e':
+				info, err := os.Stat(selectedfile)
+				if err != nil {
+					panic(err)
+				}
+				if !info.IsDir() {
+					cmd := exec.Command("bash", "-c", "chmod +x " + selectedfile)
+					cmd.Run()
+					cmd = exec.Command("bash", "-c", selectedfile)
+					cmd.Run()
+				} 
 			}
 		}
 		return event
