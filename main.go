@@ -262,9 +262,6 @@ func main() {
 			// a was entered
 			case 'q':
 				app.Stop()
-			case 'e':
-				exec.Command("bash", "-c", "chmod +x " + currentfile)
-				exec.Command("bash", "-c", currentfile)
 			}
 		}
 		return event
