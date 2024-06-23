@@ -14,6 +14,44 @@ import (
 	"github.com/rivo/tview"
 )
 
+// displayHelp ...
+func displayHelp(app *tview.Application, wContents *tview.TextView)  {
+	var helptext string
+	helptext = "Help"
+	helptext += "\ne: Execute selected script"
+	helptext += "\nq: Quit program"
+	helptext += "\nF2: Switch to input field"
+	wContents.SetText(helptext)
+}
+
+// setupUI ...
+func setupUI(app *tview.Application, wHeader *tview.TextView ,wMenu *tview.List, wContents *tview.TextView, wFooter *tview.TextView, wDropdown *tview.DropDown, wInputfield *tview.InputField, wGrid *tview.Grid, startingfolder string)  {
+
+	// generate widgets
+	wHeader.SetTextAlign(tview.AlignCenter).SetText("Nomispaz linux manager")
+	wFooter.SetTextAlign(tview.AlignLeft).SetText(" ")
+	wMenu.ShowSecondaryText(false).SetMainTextColor(tcell.ColorNavy)
+	wContents.SetTextAlign(tview.AlignLeft).SetText(" ").SetDynamicColors(false).SetTextColor(tcell.ColorSlateGrey)
+
+	wInputfield.SetLabel("Destination: ").
+		SetPlaceholder(startingfolder).
+		SetDoneFunc(func(key tcell.Key) {
+			app.Stop()
+		})
+
+	wGrid.SetRows(1, 1, 0, 1).
+		SetColumns(40, 0).
+		SetBorders(true).
+		// p primitive, row, column, rowSpan, colSpan, minGridHeight, minGridWidth, focus bool
+		AddItem(wHeader, 0, 0, 1, 2, 0, 0, false).
+		AddItem(wDropdown, 1, 0, 1, 1, 0, 0, false).
+		AddItem(wInputfield, 1, 1, 1, 1, 0, 0, false).
+		AddItem(wFooter.SetText(startingfolder), 3, 0, 1, 2, 0, 0, false)
+
+	wGrid.AddItem(wMenu, 2, 0, 1, 1, 0, 0, false).
+		AddItem(wContents, 2, 1, 1, 1, 0, 0, false)
+}
+
 // parsepath: resolve "~" in path to home directory
 func parsepath(path string, userhome string) string {
 
@@ -167,15 +205,19 @@ func populateMenu(app *tview.Application, wMenu *tview.List, wContents *tview.Te
 func main() {
 
 	app := tview.NewApplication()
+	wHeader := tview.NewTextView()
+	wFooter := tview.NewTextView()
+	wContents := tview.NewTextView()
+	wDropdown := tview.NewDropDown()
+	wInputfield := tview.NewInputField()
+	wMenu := tview.NewList()
+	wGrid := tview.NewGrid()
 
 	userhome, err := os.UserHomeDir()
-
-	var selectedfile string
-	
 	if err != nil {
 		panic(err)
 	}
-	
+
 	mConfig := parseconfigfile()
 
 	startingfolder, keyexists := mConfig["defaultfolder"]
@@ -187,39 +229,13 @@ func main() {
 		startingfolder = parsepath(startingfolder, userhome)
 	}
 	
-	
-	// generate widgets
-	wHeader := tview.NewTextView().SetTextAlign(tview.AlignCenter).SetText("Nomispaz linux manager")
-	wFooter := tview.NewTextView().SetTextAlign(tview.AlignLeft).SetText(" ")
-	wMenu := tview.NewList().ShowSecondaryText(false).SetMainTextColor(tcell.ColorNavy)
-	wContents := tview.NewTextView().SetTextAlign(tview.AlignLeft).SetText(" ").SetDynamicColors(false).SetTextColor(tcell.ColorSlateGrey)
-	wDropdown := tview.NewDropDown()
-
-	wInputfield := tview.NewInputField().
-		SetLabel("Destination: ").
-		SetPlaceholder(startingfolder).
-		SetDoneFunc(func(key tcell.Key) {
-			app.Stop()
-		})
-
-	// set current folder to users home directory
-	currentFolder := startingfolder
-
-	grid := tview.NewGrid().
-		SetRows(1, 1, 0, 1).
-		SetColumns(40, 0).
-		SetBorders(true).
-		// p primitive, row, column, rowSpan, colSpan, minGridHeight, minGridWidth, focus bool
-		AddItem(wHeader, 0, 0, 1, 2, 0, 0, false).
-		AddItem(wDropdown, 1, 0, 1, 1, 0, 0, false).
-		AddItem(wInputfield, 1, 1, 1, 1, 0, 0, false).
-		AddItem(wFooter.SetText(currentFolder), 3, 0, 1, 2, 0, 0, false)
-
-	grid.AddItem(wMenu, 2, 0, 1, 1, 0, 0, false).
-		AddItem(wContents, 2, 1, 1, 1, 0, 0, false)
+	// setup UI
+	setupUI(app, wHeader, wMenu, wContents, wFooter, wDropdown, wInputfield, wGrid, startingfolder)
 
 	populateDropdown(app, wDropdown)
-	populateMenu(app, wMenu, wContents, wFooter, currentFolder, &selectedfile)
+
+	var selectedfile string
+	populateMenu(app, wMenu, wContents, wFooter, startingfolder, &selectedfile)
 
 	// check for keypress
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -228,7 +244,10 @@ func main() {
 		// if key is ESC, stop app
 		case tcell.KeyEsc:
 			app.Stop()
-
+		case tcell.KeyF1:
+			displayHelp(app, wContents)
+		case tcell.KeyF2:
+			app.SetFocus(wInputfield)
 		// change focus between Menu, Contents and Dropdown
 		// Color of focused window is Green, of unfocused Grey
 		case tcell.KeyTab:
@@ -285,7 +304,7 @@ func main() {
 		return event
 	})
 
-	if err := app.SetRoot(grid, true).SetFocus(wMenu).EnableMouse(true).Run(); err != nil {
+	if err := app.SetRoot(wGrid, true).SetFocus(wMenu).EnableMouse(true).Run(); err != nil {
 		panic(err)
 	}
 }
