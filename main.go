@@ -9,47 +9,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
+	"log"
+	
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 // displayHelp ...
-func displayHelp(app *tview.Application, wContents *tview.TextView)  {
+func (t *Tui) displayHelp()  {
 	var helptext string
 	helptext = "Help"
 	helptext += "\ne: Execute selected script"
 	helptext += "\nq: Quit program"
 	helptext += "\nF2: Switch to input field"
-	wContents.SetText(helptext)
-}
-
-// setupUI ...
-func setupUI(app *tview.Application, wHeader *tview.TextView ,wMenu *tview.List, wContents *tview.TextView, wFooter *tview.TextView, wDropdown *tview.DropDown, wInputfield *tview.InputField, wGrid *tview.Grid, startingfolder string)  {
-
-	// generate widgets
-	wHeader.SetTextAlign(tview.AlignCenter).SetText("Nomispaz linux manager")
-	wFooter.SetTextAlign(tview.AlignLeft).SetText(" ")
-	wMenu.ShowSecondaryText(false).SetMainTextColor(tcell.ColorNavy)
-	wContents.SetTextAlign(tview.AlignLeft).SetText(" ").SetDynamicColors(false).SetTextColor(tcell.ColorSlateGrey)
-
-	wInputfield.SetLabel("Destination: ").
-		SetPlaceholder(startingfolder).
-		SetDoneFunc(func(key tcell.Key) {
-			app.Stop()
-		})
-
-	wGrid.SetRows(1, 1, 0, 1).
-		SetColumns(40, 0).
-		SetBorders(true).
-		// p primitive, row, column, rowSpan, colSpan, minGridHeight, minGridWidth, focus bool
-		AddItem(wHeader, 0, 0, 1, 2, 0, 0, false).
-		AddItem(wDropdown, 1, 0, 1, 1, 0, 0, false).
-		AddItem(wInputfield, 1, 1, 1, 1, 0, 0, false).
-		AddItem(wFooter.SetText(startingfolder), 3, 0, 1, 2, 0, 0, false)
-
-	wGrid.AddItem(wMenu, 2, 0, 1, 1, 0, 0, false).
-		AddItem(wContents, 2, 1, 1, 1, 0, 0, false)
+	t.contents.SetText(helptext)
 }
 
 // parsepath: resolve "~" in path to home directory
@@ -93,8 +66,110 @@ func parseconfigfile() map[string]string {
 	return configs
 }
 
+// create structure for terminal interface
+type Tui struct {
+	app        *tview.Application
+	grid       *tview.Grid
+	inputfield *tview.InputField
+	header     *tview.TextView
+	menu       *tview.List
+	contents   *tview.TextView
+	footer     *tview.TextView
+	dropdown   *tview.DropDown
+
+	selectedMenuEntry string
+	curfolder string
+}
+
+// function to create basic app with strct Tui
+func CreateApplication() *Tui {
+	return new(Tui)
+}
+
+// initialize the Tui struct
+func (t *Tui) Init() {
+	t.app = tview.NewApplication()
+	t.grid = tview.NewGrid()
+	t.inputfield = tview.NewInputField()
+	t.header = tview.NewTextView()
+	t.menu = tview.NewList()
+	t.contents = tview.NewTextView()
+	t.footer = tview.NewTextView()
+	t.dropdown = tview.NewDropDown()
+
+	t.selectedMenuEntry = ""
+	t.curfolder = ""
+}
+
+// setup the initial TUI
+func (t *Tui) SetupTUI()  {
+
+ 	// generate widgets
+	t.header.SetTextAlign(tview.AlignCenter).SetText("Nomispaz linux manager")
+	t.footer.SetTextAlign(tview.AlignLeft).SetText(" ")
+	t.menu.ShowSecondaryText(false).SetMainTextColor(tcell.ColorNavy).
+		SetSelectedFunc(func(i int, main string, secondary string, shortcut rune) {
+			if !(shortcut=='q' || shortcut=='b') {
+				t.selectedMenuEntry = t.curfolder + "/" + main
+
+				// first check if entry is a dir or file
+				info, err := os.Stat(t.selectedMenuEntry)
+				if err != nil {
+					fmt.Println("could not run command: ", err)
+				}
+
+				if !info.IsDir() {
+					// entry is file --> display contents
+					fileContent, err := os.ReadFile(t.selectedMenuEntry)
+					if err != nil {
+						panic(err)
+					}
+					t.contents.SetText(string(fileContent))
+					
+				} else {
+					// folder was selected --> recreate list with entries in subfolder
+					t.curfolder = t.selectedMenuEntry
+					t.contents.SetText("")
+					t.populateMenu()
+				}
+				t.footer.SetText(t.selectedMenuEntry)			
+			}
+		})
+	t.contents.SetTextAlign(tview.AlignLeft).SetText(" ").SetDynamicColors(false).SetTextColor(tcell.ColorSlateGrey)
+
+	t.inputfield.SetLabel("Destination: ").
+		SetDoneFunc(func(key tcell.Key) {
+			// first check if entry is a dir or file
+			log.Println(t.inputfield.GetText())
+			info, err := os.Stat(t.inputfield.GetText())
+			if err != nil {
+				log.Println("Cannot stat " + t.inputfield.GetText())
+			}
+
+			if info.IsDir() {
+				t.curfolder = t.inputfield.GetText()
+				t.populateMenu()
+			} else {
+				t.contents.SetText("No valid folder entered")
+			}
+		})
+
+	t.grid.SetRows(1, 1, 0, 1).
+		SetColumns(40, 0).
+		SetBorders(true).
+		// p primitive, row, column, rowSpan, colSpan, minGridHeight, minGridWidth, focus bool
+		AddItem(t.header, 0, 0, 1, 2, 0, 0, false).
+		AddItem(t.dropdown, 1, 0, 1, 1, 0, 0, false).
+		AddItem(t.inputfield, 1, 1, 1, 1, 0, 0, false)
+		//	AddItem(t.footer.SetText(startingfolder), 3, 0, 1, 2, 0, 0, false)
+
+	t.grid.AddItem(t.menu, 2, 0, 1, 1, 0, 0, false).
+		AddItem(t.contents, 2, 1, 1, 1, 0, 0, false)
+
+}
+
 // populateDropdown: populate the dropdown menu
-func populateDropdown(app *tview.Application, wDropdown *tview.DropDown) {
+func (t *Tui) populateDropdown() {
 
 	// use github api to get all public repositories of my user
 	cmd, err := exec.Command("bash", "-c", "curl https://api.github.com/users/nomispaz/repos | grep full_name | cut -d':' -f 2 | cut -d'\"' -f 2").Output()
@@ -107,20 +182,20 @@ func populateDropdown(app *tview.Application, wDropdown *tview.DropDown) {
 
 	// loop through slice and populate dropdown-menu
 	for _, s := range result_split {
-		wDropdown.AddOption(s,nil)
+		t.dropdown.AddOption(s,nil)
 	}
 }
 
 // populateMenu populate the side menu
-func populateMenu(app *tview.Application, wMenu *tview.List, wContents *tview.TextView, wFooter *tview.TextView, curfolder string, selectedfile *string) {
+func (t *Tui) populateMenu() {
 
 	// remove all items from list
-	for i := range wMenu.GetItemCount() {
-		wMenu.RemoveItem(i)
+	for i := range t.menu.GetItemCount() {
+		t.menu.RemoveItem(i)
 	}
 
 	// run ls command and parse it line by line to Menu list
-	cmd := exec.Command("bash", "-c", "ls " + curfolder)
+	cmd := exec.Command("bash", "-c", "ls " + t.curfolder)
 
 	// get a pipe to read from standard output
 	stdout, _ := cmd.StdoutPipe()
@@ -140,32 +215,9 @@ func populateMenu(app *tview.Application, wMenu *tview.List, wContents *tview.Te
 		// Read line by line and process it
 		for cmd_scanner.Scan() {
 			line := cmd_scanner.Text()
-			curfile := curfolder + "/" + string(line)
+			t.selectedMenuEntry = t.curfolder + "/" + string(line)
 			// AddItem(shortname, description, rune, function)
-			wMenu.AddItem(string(line), "", '-',
-				func() {
-					// first check if entry is a dir or file
-					info, err := os.Stat(curfile)
-					if err != nil {
-						fmt.Println("could not run command: ", err)
-					}
-
-					if !info.IsDir() {
-						// entry is file --> display contents
-						fileContent, err := os.ReadFile(curfile)
-						if err != nil {
-							panic(err)
-						}
-						wContents.SetText(string(fileContent))
-						*selectedfile = curfile
-					} else {
-						// folder was selected --> recreate list with entries in subfolder
-						populateMenu(app, wMenu, wContents, wFooter, curfile, selectedfile)
-						wContents.SetText("")
-
-					}
-					wFooter.SetText(curfile)
-				})
+			t.menu.AddItem(string(line), "", '-',nil)
 		}
 		// We're all done, unblock the channel
 		done <- struct{}{}
@@ -185,34 +237,106 @@ func populateMenu(app *tview.Application, wMenu *tview.List, wContents *tview.Te
 	err = cmd.Wait()
 
 	// press b to go one level up
-	wMenu.AddItem("Back", "One level up", 'b', func() {
+	t.menu.AddItem("Back", "One level up", 'b', func() {
 		// cut string after last "/", i.e. cut last folder
 		// --> resulting string contains folder one level up
-		lastInd := strings.LastIndex(curfolder, "/")
-		populateMenu(app, wMenu, wContents, wFooter, curfolder[:lastInd], selectedfile)
-		wContents.SetText("")
-		wFooter.SetText(curfolder[:lastInd])
+		lastInd := strings.LastIndex(t.curfolder, "/")
+		t.curfolder = t.curfolder[:lastInd]
+		t.contents.SetText("")
+		t.footer.SetText(t.curfolder[:lastInd])
+		t.populateMenu()
 	})
 
 	// press q to exit
-	wMenu.AddItem("Quit", "Press to exit", 'q', func() {
-		app.Stop()
+	t.menu.AddItem("Quit", "Press to exit", 'q', func() {
+		t.app.Stop()
 	})
 
 }
 
-// main function
-func main() {
+// Keybindungs ...
+func (t *Tui) Keybindings()  {
+	
+	t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
 
-	app := tview.NewApplication()
-	wHeader := tview.NewTextView()
-	wFooter := tview.NewTextView()
-	wContents := tview.NewTextView()
-	wDropdown := tview.NewDropDown()
-	wInputfield := tview.NewInputField()
-	wMenu := tview.NewList()
-	wGrid := tview.NewGrid()
+		// if key is ESC, stop app
+		case tcell.KeyEsc:
+			t.app.Stop()
+		case tcell.KeyF1:
+			t.displayHelp()
+		case tcell.KeyF2:
+			t.app.SetFocus(t.inputfield)
+			t.contents.SetTextColor(tcell.ColorSlateGrey)
+			t.menu.SetMainTextColor(tcell.ColorSlateGrey)
 
+		// change focus between Menu, Contents and Dropdown
+		// Color of focused window is Green, of unfocused Grey
+		case tcell.KeyTab:
+			if t.menu.HasFocus() {
+				t.app.SetFocus(t.contents)
+				t.contents.SetTextColor(tcell.ColorNavy)
+				t.menu.SetMainTextColor(tcell.ColorSlateGrey)
+			} else if t.contents.HasFocus() {
+				t.app.SetFocus(t.dropdown)
+				t.contents.SetTextColor(tcell.ColorSlateGrey)
+				t.menu.SetMainTextColor(tcell.ColorSlateGray)
+			} else if t.dropdown.HasFocus() {
+				t.app.SetFocus(t.menu)
+				t.contents.SetTextColor(tcell.ColorSlateGrey)
+				t.menu.SetMainTextColor(tcell.ColorNavy)
+			} else if t.inputfield.HasFocus() {
+				t.app.SetFocus(t.menu)
+				t.contents.SetTextColor(tcell.ColorSlateGrey)
+				t.menu.SetMainTextColor(tcell.ColorNavy)
+			}
+		case tcell.KeyBacktab:
+			if t.contents.HasFocus() {
+				t.app.SetFocus(t.menu)
+				t.contents.SetTextColor(tcell.ColorSlateGrey)
+				t.menu.SetMainTextColor(tcell.ColorNavy)
+			} else if t.menu.HasFocus() {
+				t.app.SetFocus(t.dropdown)
+				t.contents.SetTextColor(tcell.ColorSlateGrey)
+				t.menu.SetMainTextColor(tcell.ColorSlateGray)
+			} else if t.dropdown.HasFocus() {
+				t.app.SetFocus(t.contents)
+				t.contents.SetTextColor(tcell.ColorNavy)
+				t.menu.SetMainTextColor(tcell.ColorSlateGray)
+			}
+
+		// if no special key is entered, check for "keyrunes", i.e. normal keys and numbers
+		case tcell.KeyRune:
+			switch event.Rune() {
+			// execute selected script
+			// only if file was selected
+			case 'e':
+				if t.contents.HasFocus() {
+					info, err := os.Stat(t.selectedMenuEntry)
+					if err != nil {
+						panic(err)
+					}
+					if !info.IsDir() {
+						cmd := exec.Command("bash", "-c", "chmod +x " + t.selectedMenuEntry)
+						cmd.Run()
+						cmd = exec.Command("bash", "-c", t.selectedMenuEntry)
+						cmd.Run()
+					}
+				}
+			}
+		}
+		return event
+	})
+}
+
+// main ...
+func main()  {
+	tui := CreateApplication()
+	tui.Init()
+	tui.SetupTUI()
+	tui.Keybindings()
+
+	// setup initial folder (read from configfile or user home as standard)
 	userhome, err := os.UserHomeDir()
 	if err != nil {
 		panic(err)
@@ -228,83 +352,16 @@ func main() {
 	} else {
 		startingfolder = parsepath(startingfolder, userhome)
 	}
+
+	tui.curfolder = startingfolder
 	
-	// setup UI
-	setupUI(app, wHeader, wMenu, wContents, wFooter, wDropdown, wInputfield, wGrid, startingfolder)
-
-	populateDropdown(app, wDropdown)
-
-	var selectedfile string
-	populateMenu(app, wMenu, wContents, wFooter, startingfolder, &selectedfile)
-
-	// check for keypress
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-
-		// if key is ESC, stop app
-		case tcell.KeyEsc:
-			app.Stop()
-		case tcell.KeyF1:
-			displayHelp(app, wContents)
-		case tcell.KeyF2:
-			app.SetFocus(wInputfield)
-		// change focus between Menu, Contents and Dropdown
-		// Color of focused window is Green, of unfocused Grey
-		case tcell.KeyTab:
-			if wMenu.HasFocus() {
-				app.SetFocus(wContents)
-				wContents.SetTextColor(tcell.ColorNavy)
-				wMenu.SetMainTextColor(tcell.ColorSlateGrey)
-			} else if wContents.HasFocus() {
-				app.SetFocus(wDropdown)
-				wContents.SetTextColor(tcell.ColorSlateGrey)
-				wMenu.SetMainTextColor(tcell.ColorSlateGray)
-			} else if wDropdown.HasFocus() {
-				app.SetFocus(wMenu)
-				wContents.SetTextColor(tcell.ColorSlateGrey)
-				wMenu.SetMainTextColor(tcell.ColorNavy)
-			}
-		case tcell.KeyBacktab:
-			if wContents.HasFocus() {
-				app.SetFocus(wMenu)
-				wContents.SetTextColor(tcell.ColorSlateGrey)
-				wMenu.SetMainTextColor(tcell.ColorNavy)
-			} else if wMenu.HasFocus() {
-				app.SetFocus(wDropdown)
-				wContents.SetTextColor(tcell.ColorSlateGrey)
-				wMenu.SetMainTextColor(tcell.ColorSlateGray)
-			} else if wDropdown.HasFocus() {
-				app.SetFocus(wContents)
-				wContents.SetTextColor(tcell.ColorNavy)
-				wMenu.SetMainTextColor(tcell.ColorSlateGray)
-			}
-
-		// if no special key is entered, check for "keyrunes", i.e. normal keys and numbers
-		case tcell.KeyRune:
-			switch event.Rune() {
-
-			// quit program
-			case 'q':
-				app.Stop()
-				
-			// execute selected script
-			case 'e':
-				info, err := os.Stat(selectedfile)
-				if err != nil {
-					panic(err)
-				}
-				if !info.IsDir() {
-					cmd := exec.Command("bash", "-c", "chmod +x " + selectedfile)
-					cmd.Run()
-					cmd = exec.Command("bash", "-c", selectedfile)
-					cmd.Run()
-				} 
-			}
-		}
-		return event
-	})
-
-	if err := app.SetRoot(wGrid, true).SetFocus(wMenu).EnableMouse(true).Run(); err != nil {
+	// fill initialized Tui with entries
+	tui.inputfield.SetPlaceholder(startingfolder)
+	tui.populateDropdown()
+	tui.populateMenu()
+	
+	if err := tui.app.SetRoot(tui.grid, true).SetFocus(tui.menu).EnableMouse(true).Run(); err != nil {
 		panic(err)
 	}
+
 }
